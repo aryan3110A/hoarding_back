@@ -1,0 +1,351 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Role {
+  id    Int    @id @default(autoincrement())
+  name  String @unique
+  users User[]
+}
+
+model User {
+  id            String           @id @default(uuid())
+  name          String
+  email         String?          @unique
+  phone         String?          @unique
+  password      String
+  roleId        Int
+  isActive      Boolean          @default(true)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  bookings      Booking[]        @relation("createdByBookings")
+  bookedHoardings Hoarding[]     @relation("BookedByUser")
+  locations     LocationLog[]
+  notifications Notification[]
+  sessions      RefreshSession[]
+  role          Role             @relation(fields: [roleId], references: [id])
+  devices       UserDevice[]
+  territories   UserTerritory[]
+  bookingTokens BookingToken[]   @relation("SalesUserTokens")
+  designerTokens BookingToken[]  @relation("DesignerTokens")
+  fitterTokens   BookingToken[]  @relation("FitterTokens")
+  createdClients Client[]
+  proposals      Proposal[]
+}
+
+model Territory {
+  id          String          @id @default(uuid())
+  name        String
+  city        String?
+  description String?
+  createdAt   DateTime        @default(now())
+  sales       UserTerritory[]
+}
+
+model UserTerritory {
+  userId      String
+  territoryId String
+  territory   Territory @relation(fields: [territoryId], references: [id])
+  user        User      @relation(fields: [userId], references: [id])
+
+  @@id([userId, territoryId])
+}
+
+model UserDevice {
+  id         String   @id @default(uuid())
+  userId     String
+  deviceId   String
+  deviceName String?
+  platform   String?
+  lastIp     String?
+  lastLat    Float?
+  lastLng    Float?
+  lastSeen   DateTime @default(now())
+  createdAt  DateTime @default(now())
+  isRevoked  Boolean  @default(false)
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([deviceId])
+}
+
+model RefreshSession {
+  id                  String    @id @default(uuid())
+  userId              String
+  deviceId            String
+  refreshTokenHash    String
+  issuedAt            DateTime  @default(now())
+  lastUsedAt          DateTime  @default(now())
+  expiresAt           DateTime
+  inactivityExpiresAt DateTime?
+  ip                  String?
+  userAgent           String?
+  revoked             Boolean   @default(false)
+  user                User      @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([deviceId])
+}
+
+model LocationLog {
+  id        String   @id @default(uuid())
+  userId    String
+  deviceId  String?
+  type      String
+  lat       Float?
+  lng       Float?
+  accuracy  Int?
+  ip        String?
+  note      String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+model Hoarding {
+  id              String        @id @default(uuid())
+  code            String        @unique
+  title           String?
+  city            String?
+  area            String?
+  landmark        String?
+  roadName        String?
+  side            String?
+  lat             Float?
+  lng             Float?
+  widthCm         Int?
+  heightCm        Int?
+  type            String?
+  ownership       String?
+  status          String        @default("available")
+  // Operational workflow state (separate from public availability status)
+  // Example values: UNDER_PROCESS, FITTER_ASSIGNED, FITTED
+  workflowState   String?
+  bookedById      String?
+  bookedAt        DateTime?
+  baseRate        Decimal?      @db.Decimal(14, 2)
+  rateHistory     Json?
+  images          Json?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  propertyGroupId String?       @db.VarChar(100)
+  bookings        Booking[]
+  propertyRent    PropertyRent? @relation(fields: [propertyGroupId], references: [propertyGroupId])
+  rent            Rent?
+  tokens          BookingToken[] @relation("HoardingTokens")
+  bookedBy        User?         @relation("BookedByUser", fields: [bookedById], references: [id])
+  proposalHoardings ProposalHoarding[]
+
+  @@index([propertyGroupId])
+}
+
+model Booking {
+  id            String    @id @default(uuid())
+  hoardingId    String
+  clientName    String?
+  clientContact String?
+  startDate     DateTime?
+  endDate       DateTime?
+  status        String    @default("confirmed")
+  price         Decimal?  @db.Decimal(14, 2)
+  createdBy     String?
+  createdAt     DateTime  @default(now())
+  createdByUser User?     @relation("createdByBookings", fields: [createdBy], references: [id])
+  hoarding      Hoarding  @relation(fields: [hoardingId], references: [id])
+
+  @@index([hoardingId, startDate, endDate])
+}
+
+enum TokenStatus {
+  ACTIVE
+  CONFIRMED
+  EXPIRED
+  CANCELLED
+}
+
+model BookingToken {
+  id            String      @id @default(uuid())
+  hoardingId    String
+  dateFrom      DateTime
+  dateTo        DateTime
+  salesUserId   String
+  clientId      String
+  status        TokenStatus @default(ACTIVE)
+  queuePosition Int
+  expiresAt     DateTime
+  createdAt     DateTime    @default(now())
+  durationMonths Int
+  notes         String?
+
+  // Designer assignment and design workflow
+  designerId    String?
+  designStatus  DesignStatus @default(PENDING)
+  designNotes   String?
+
+  // Fitter assignment and installation workflow
+  fitterId       String?
+  fitterStatus   FitterStatus @default(PENDING)
+  fitterNotes    String?
+  fitterAssignedAt DateTime?
+  fitterStartedAt  DateTime?
+  fitterCompletedAt DateTime?
+
+  // Installation proof images uploaded by fitter
+  installationImages Json?
+
+  hoarding      Hoarding    @relation("HoardingTokens", fields: [hoardingId], references: [id])
+  salesUser     User        @relation("SalesUserTokens", fields: [salesUserId], references: [id])
+  client        Client      @relation(fields: [clientId], references: [id])
+  designer      User?       @relation("DesignerTokens", fields: [designerId], references: [id])
+  fitter        User?       @relation("FitterTokens", fields: [fitterId], references: [id])
+
+  @@index([hoardingId, dateFrom, dateTo])
+  @@index([clientId])
+  @@index([designerId])
+  @@index([fitterId])
+}
+
+enum DesignStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum FitterStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+model Client {
+  id           String   @id @default(uuid())
+
+  name         String
+  phone        String   @unique
+  email        String?
+  companyName  String?
+
+  createdById  String?
+  createdBy    User?    @relation(fields: [createdById], references: [id])
+
+  tokens       BookingToken[]
+  proposals    Proposal[]
+
+  isActive     Boolean  @default(true)
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([createdById])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  action     String
+  entityType String?
+  entityId   String?
+  payload    Json?
+  createdAt  DateTime @default(now())
+
+  @@index([createdAt(sort: Desc)])
+}
+
+model Rent {
+  id              String    @id @default(uuid())
+  hoardingId      String    @unique
+  partyType       String
+  rentAmount      Decimal   @db.Decimal(14, 2)
+  incrementYear   Int?
+  paymentMode     String
+  lastPaymentDate DateTime?
+  nextDueDate     DateTime?
+  createdAt       DateTime  @default(now())
+  hoarding        Hoarding  @relation(fields: [hoardingId], references: [id])
+}
+
+model PropertyRent {
+  id                  String           @id @default(uuid())
+  propertyGroupId     String           @unique
+  location            String?
+  rentAmount          Decimal          @db.Decimal(14, 2)
+  incrementCycleYears Int              @default(1)
+  incrementRate       Decimal          @default(0.10) @db.Decimal(5, 2)
+  paymentFrequency    PaymentFrequency
+  lastPaymentDate     DateTime?
+  nextDueDate         DateTime?
+  reminderDays        Int[]
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  landlord            String?
+  hoardings           Hoarding[]
+
+  // New rent increment fields
+  baseRent             Decimal?        @db.Decimal(14, 2)
+  rentStartDate        DateTime?
+  incrementType        IncrementType?  @default(PERCENTAGE)
+  incrementValue       Decimal?        @db.Decimal(14, 2)
+  lastIncrementDate    DateTime?
+  nextIncrementDate    DateTime?
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  body      String
+  link      String?
+  // Optional idempotency key to prevent duplicate notifications for the same event
+  dedupeKey String?  @unique
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+enum PaymentFrequency {
+  Monthly
+  Quarterly
+  HalfYearly
+  Yearly
+}
+
+enum IncrementType {
+  PERCENTAGE
+  AMOUNT
+}
+
+model Proposal {
+  id         String             @id @default(uuid())
+  clientId   String
+  salesUserId String
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  client     Client             @relation(fields: [clientId], references: [id])
+  salesUser  User               @relation(fields: [salesUserId], references: [id])
+  hoardings  ProposalHoarding[]
+
+  @@index([clientId])
+  @@index([salesUserId])
+}
+
+model ProposalHoarding {
+  id         String   @id @default(uuid())
+  proposalId String
+  hoardingId String
+  status     String   @default("pending")
+
+  proposal   Proposal @relation(fields: [proposalId], references: [id])
+  hoarding   Hoarding @relation(fields: [hoardingId], references: [id])
+
+  @@index([proposalId])
+  @@index([hoardingId])
+}
